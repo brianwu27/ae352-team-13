@@ -66,37 +66,34 @@ def circle_x_ref_dot(t: float) -> np.ndarray:
     return x_ref_dot
 
 
-# -----------------------------
-# Closed-loop dynamics
-# -----------------------------
 def make_closed_loop_rhs(A, B, K):
     """
     f(t, x) for:
         ẋ = A x + B u
         u = u_ref(t) - K (x - x_ref(t))
-
-    where u_ref makes (x_ref, u_ref) follow the desired circle
-    in the *linear* dynamics.
     """
+    input_history = []  # <-- log (t, u)
+
     def f(t, x):
         x_ref = circle_x_ref(t)
         x_ref_dot = circle_x_ref_dot(t)
 
-        # Solve for feed-forward input u_ref:
-        #   ẋ_ref = A x_ref + B u_ref
-        # => u_ref (least-squares) = B^+ (ẋ_ref - A x_ref)
         rhs = x_ref_dot - A @ x_ref
         u_ref, *_ = la.lstsq(B, rhs, rcond=None)  # shape (4,)
 
-        # Feedback on tracking error
         e = x - x_ref
         du = -K @ e
         u = u_ref + du
 
+        input_history.append((t, u.copy()))  # <-- log inputs for plots
+
         xdot = A @ x + B @ u
         return xdot
 
+    f.input_history = input_history  # <-- attach
     return f
+
+
 
 
 # -----------------------------
@@ -137,91 +134,191 @@ def main():
     phi  = x[6, :]
     theta = x[7, :]
     psi  = x[8, :]
+    p    = x[9, :]
+    q    = x[10, :]
+    r    = x[11, :]
 
-    speed_xy = np.sqrt(vx**2 + vy**2)
+    # -----------------------------
+    # Build derived quantities (needed for plots)
+    # -----------------------------
+    speed_xy  = np.sqrt(vx**2 + vy**2)
     radius_xy = np.sqrt(px**2 + py**2)
 
-    # ---------- plots ----------
-    plt.figure(figsize=(13, 8))
+        # -----------------------------
+    # Inputs u(t) from logged history
+    # -----------------------------
+    t_input   = np.array([item[0] for item in f_cl.input_history])
+    u_history = np.array([item[1] for item in f_cl.input_history])
 
-    # 3D position
-    ax1 = plt.subplot(2, 3, 1, projection='3d')
-    ax1.plot(px, py, pz, label='Trajectory')
-    ax1.set_xlabel('x [m]')
-    ax1.set_ylabel('y [m]')
-    ax1.set_zlabel('z [m]')
-    ax1.set_title('3D Position')
-    ax1.grid(True)
-    ax1.legend()
+    F         = u_history[:, 0]
+    tau_phi   = u_history[:, 1]
+    tau_theta = u_history[:, 2]
+    tau_psi   = u_history[:, 3]
+    
+    F_phys = params.m * params.g + F   # interpret F as ΔF around hover
 
-    # XY path
-    ax2 = plt.subplot(2, 3, 2)
-    ax2.plot(px, py, label='Trajectory')
-    R = 2.0
-    th = np.linspace(0, 2*np.pi, 200)
-    ax2.plot(R*np.cos(th), R*np.sin(th), 'r--', label='Reference circle')
-    ax2.set_aspect('equal', 'box')
-    ax2.set_xlabel('x [m]')
-    ax2.set_ylabel('y [m]')
-    ax2.set_title('XY Path')
-    ax2.grid(True)
-    ax2.legend()
 
-    # Altitude
-    ax3 = plt.subplot(2, 3, 3)
-    ax3.plot(t, pz, label='pz(t)')
-    ax3.axhline(1.0, color='r', linestyle='--', label='Target: 1 m')
-    ax3.set_xlabel('Time [s]')
-    ax3.set_ylabel('Altitude z [m]')
-    ax3.set_title('Altitude vs Time')
-    ax3.grid(True)
-    ax3.legend()
+    # -----------------------------
+    # Power + Energy (same style as hover: simple proxy model)
+    # Interpolate states onto t_input so shapes match
+    # -----------------------------
+    vz_i = np.interp(t_input, t, vz)
+    p_i  = np.interp(t_input, t, p)
+    q_i  = np.interp(t_input, t, q)
+    r_i  = np.interp(t_input, t, r)
 
-    # Horizontal speed
-    ax4 = plt.subplot(2, 3, 4)
-    ax4.plot(t, speed_xy, label='|v_xy|')
-    ax4.axhline(0.5, color='r', linestyle='--', label='Target: 0.5 m/s')
-    ax4.set_xlabel('Time [s]')
-    ax4.set_ylabel('Speed [m/s]')
-    ax4.set_title('Horizontal Speed')
-    ax4.set_ylim(0, 1)
-    ax4.grid(True)
-    ax4.legend()
+    # Power model (same idea as yours, just vectorized and shape-consistent)
+    power = np.abs(F) * np.abs(vz_i) \
+        + np.abs(tau_phi)   * np.abs(p_i) \
+        + np.abs(tau_theta) * np.abs(q_i) \
+        + np.abs(tau_psi)   * np.abs(r_i)
 
-    # Radius from origin
-    ax5 = plt.subplot(2, 3, 5)
-    ax5.plot(t, radius_xy, label='radius')
-    ax5.axhline(2.0, color='r', linestyle='--', label='Target: 2 m')
-    ax5.set_xlabel('Time [s]')
-    ax5.set_ylabel('Radius [m]')
-    ax5.set_title('Distance from Origin')
-    ax5.set_ylim(0, 4)
-    ax5.grid(True)
-    ax5.legend()
+    energy_cumulative = np.cumsum(power[:-1] * np.diff(t_input))
+    energy_cumulative = np.insert(energy_cumulative, 0, 0.0)    
 
-    # Attitude
-    ax6 = plt.subplot(2, 3, 6)
-    ax6.plot(t, np.rad2deg(phi), label='φ (roll)')
-    ax6.plot(t, np.rad2deg(theta), label='θ (pitch)')
-    ax6.set_xlabel('Time [s]')
-    ax6.set_ylabel('Angle [deg]')
-    ax6.set_title('Attitude')
-    ax6.grid(True)
-    ax6.legend()
+    # -----------------------------
+    # Motor thrusts T1..T4 (best-effort mixer inversion)
+    # If params.L and params.k_tau exist, invert standard "plus" mixer.
+    # Otherwise fall back to equal split (still gives a meaningful load plot).
+    # -----------------------------
+    try:
+        L = params.L
+        k_tau = params.k_tau
 
-    plt.tight_layout()
+        M = np.array([
+            [1.0,  1.0,  1.0,  1.0],
+            [0.0, -L,   0.0, +L  ],
+            [-L,  0.0, +L,   0.0],
+            [k_tau, -k_tau, k_tau, -k_tau]
+        ])
 
-    # Stats over last 30 s
-    mask = t > 30.0
-    print("\n=== Circle Tracking Performance (last 30 s) ===")
-    print(f"Mean radius: {np.mean(radius_xy[mask]):.3f} m (target 2.0)")
-    print(f"Radius std dev: {np.std(radius_xy[mask]):.4f} m")
-    print(f"Mean speed:  {np.mean(speed_xy[mask]):.3f} m/s (target 0.5)")
-    print(f"Speed std dev: {np.std(speed_xy[mask]):.4f} m/s")
-    print(f"Mean altitude: {np.mean(pz[mask]):.3f} m (target 1.0)")
-    print(f"Altitude std dev: {np.std(pz[mask]):.4f} m")
+        U = np.vstack((F_phys, tau_phi, tau_theta, tau_psi))  # (4, N)
+        T_motors = np.linalg.solve(M, U)                 # (4, N)
+    except Exception:
+        T_motors = np.vstack((F_phys/4, F_phys/4, F_phys/4, F_phys/4))
+
+    T1, T2, T3, T4 = T_motors[0, :], T_motors[1, :], T_motors[2, :], T_motors[3, :]
+
+    # -----------------------------
+    # FIGURE 1: 3D trajectory (own figure)
+    # -----------------------------
+    fig1 = plt.figure(figsize=(8, 6))
+    ax = fig1.add_subplot(111, projection='3d')
+    ax.plot(px, py, pz, linewidth=2, label='Trajectory')
+    ax.set_xlabel('x [m]')
+    ax.set_ylabel('y [m]')
+    ax.set_zlabel('z [m]')
+    ax.set_title('3D Position (Circle)')
+    ax.grid(True)
+    ax.legend()
+
+    # -----------------------------
+    # FIGURE 2: 12 DOFs grouped (2x2) in one figure
+    # -----------------------------
+    fig2, axs = plt.subplots(2, 2, figsize=(14, 9), sharex=True)
+    axs = axs.ravel()
+
+    # Position
+    axs[0].plot(t, px, linewidth=2, label='px')
+    axs[0].plot(t, py, linewidth=2, label='py')
+    axs[0].plot(t, pz, linewidth=2, label='pz')
+    axs[0].set_ylabel('Position [m]')
+    axs[0].set_title('Position')
+    axs[0].grid(True)
+    axs[0].legend()
+
+    # Velocity
+    axs[1].plot(t, vx, linewidth=2, label='vx')
+    axs[1].plot(t, vy, linewidth=2, label='vy')
+    axs[1].plot(t, vz, linewidth=2, label='vz')
+    axs[1].axhline(0.0, linestyle='--', alpha=0.3)
+    axs[1].set_ylabel('Velocity [m/s]')
+    axs[1].set_title('Velocity')
+    axs[1].grid(True)
+    axs[1].legend()
+
+    # Euler angles
+    axs[2].plot(t, np.rad2deg(phi), linewidth=2, label='φ (roll)')
+    axs[2].plot(t, np.rad2deg(theta), linewidth=2, label='θ (pitch)')
+    axs[2].plot(t, np.rad2deg(psi), linewidth=2, label='ψ (yaw)')
+    axs[2].axhline(0.0, linestyle='--', alpha=0.3)
+    axs[2].set_xlabel('Time [s]')
+    axs[2].set_ylabel('Angle [deg]')
+    axs[2].set_title('Euler Angles')
+    axs[2].set_ylim(-1.0, 1.0)
+    axs[2].grid(True)
+    axs[2].legend()
+
+    # Body rates
+    axs[3].plot(t, np.rad2deg(p), linewidth=2, label='p (roll rate)')
+    axs[3].plot(t, np.rad2deg(q), linewidth=2, label='q (pitch rate)')
+    axs[3].plot(t, np.rad2deg(r), linewidth=2, label='r (yaw rate)')
+    axs[3].axhline(0.0, linestyle='--', alpha=0.3)
+    axs[3].set_xlabel('Time [s]')
+    axs[3].set_ylabel('Rate [deg/s]')
+    axs[3].set_title('Angular Rates')
+    axs[3].set_ylim(-1.9, 1.9)
+    axs[3].grid(True)
+    axs[3].legend()
+
+    fig2.suptitle('State Time Histories (12 DOF)', fontsize=14)
+    fig2.tight_layout()
+    fig2.subplots_adjust(top=0.92)
+
+    fig3, axs3 = plt.subplots(2, 2, figsize=(14, 9))
+    axs3 = axs3.ravel()
+
+    # (1) Inputs: thrust + torques (twin y-axis)
+    ax_u = axs3[0]
+    ax_u.plot(t_input, F_phys, linewidth=2, label='F (thrust)')  # F_plot = T_total (hover) OR F_phys (circle)
+    ax_u.set_xlabel('Time [s]')
+    ax_u.set_ylabel('Thrust [N]')
+    ax_u.set_title('Inputs u(t)')
+    ax_u.grid(True)
+
+    ax_u2 = ax_u.twinx()
+    ax_u2.plot(t_input, tau_phi,   linewidth=2, linestyle='--', label='τφ')
+    ax_u2.plot(t_input, tau_theta, linewidth=2, linestyle='--', label='τθ')
+    ax_u2.plot(t_input, tau_psi,   linewidth=2, linestyle='--', label='τψ')
+    ax_u2.set_ylabel('Torque [N·m]')
+
+    # Combined legend
+    lines1, labels1 = ax_u.get_legend_handles_labels()
+    lines2, labels2 = ax_u2.get_legend_handles_labels()
+    ax_u2.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+    # (2) Motor thrusts
+    axs3[1].plot(t_input, T1, linewidth=2, label='T1')
+    axs3[1].plot(t_input, T2, linewidth=2, label='T2')
+    axs3[1].plot(t_input, T3, linewidth=2, label='T3')
+    axs3[1].plot(t_input, T4, linewidth=2, label='T4')
+    axs3[1].set_xlabel('Time [s]')
+    axs3[1].set_ylabel('Thrust [N]')
+    axs3[1].set_title('Motor Thrusts')
+    axs3[1].grid(True)
+    axs3[1].legend()
+
+    # (3) Power
+    axs3[2].plot(t_input, power, linewidth=2)
+    axs3[2].set_xlabel('Time [s]')
+    axs3[2].set_ylabel('Power [W] (proxy)')
+    axs3[2].set_title('Power')
+    axs3[2].grid(True)
+
+    # (4) Energy
+    axs3[3].plot(t_input, energy_cumulative, linewidth=2)
+    axs3[3].set_xlabel('Time [s]')
+    axs3[3].set_ylabel('Energy [J] (proxy)')
+    axs3[3].set_title('Cumulative Energy')
+    axs3[3].grid(True)
+
+    fig3.suptitle('Control Effort and Energy', fontsize=14)
+    fig3.tight_layout()
+    fig3.subplots_adjust(top=0.92)
 
     plt.show()
+
+
 
 
 if __name__ == "__main__":
