@@ -255,12 +255,46 @@ def main():
         T = np.maximum(T, 0.0)
         return (T**1.5) / np.sqrt(2.0 * rho * A_rotor)
 
-    P_mech = thrust_to_power(T1) + thrust_to_power(T2) + thrust_to_power(T3) + thrust_to_power(T4)
+    P_mech1 = thrust_to_power(T1)
+    P_mech2 = thrust_to_power(T2)
+    P_mech3 = thrust_to_power(T3)
+    P_mech4 = thrust_to_power(T4)
+    P_mech = P_mech1 + P_mech2 + P_mech3 + P_mech4
     P_elec = P_mech / eta
 
     E_cumulative = np.cumsum(P_elec[:-1] * np.diff(t_input))
     E_cumulative = np.insert(E_cumulative, 0, 0.0)
     E_total = np.trapezoid(P_elec, t_input)
+    print(E_total)
+    
+    k = params.k
+    k_tau = params.k_tau
+    omega1 = np.sqrt(T1/k)
+    omega2 = np.sqrt(T2/k)
+    omega3 = np.sqrt(T3/k)
+    omega4 = np.sqrt(T4/k)
+    print('omega1: ', omega1[10])
+    
+    rpm1 = omega1*60/(2*np.pi)
+    rpm2 = omega2*60/(2*np.pi)
+    rpm3 = omega3*60/(2*np.pi)
+    rpm4 = omega4*60/(2*np.pi)
+    
+    torque_motor1 = P_mech1/omega1
+    torque_motor2 = P_mech2/omega2
+    torque_motor3 = P_mech3/omega3
+    torque_motor4 = P_mech4/omega4
+    print('motor torque: ', torque_motor1[10])
+    
+    current1 = torque_motor1/k_tau
+    current2 = torque_motor2/k_tau
+    current3 = torque_motor3/k_tau
+    current4 = torque_motor4/k_tau
+    current_total = current1 + current2 + current3 + current4
+    print(current_total[10])
+    
+    battery_consumption = np.trapezoid(current_total, t_input) # [Ah]
+    print(battery_consumption)
 
     # -----------------------------
     # FIGURE 1: 3D trajectory (own figure)
@@ -364,15 +398,15 @@ def main():
     lines2, labels2 = ax_u2.get_legend_handles_labels()
     ax_u2.legend(lines1 + lines2, labels1 + labels2, loc='best')
 
-    # (1) Motor thrusts
-    axs3[1].plot(t_input, T1, linewidth=2, label='T1')
-    axs3[1].plot(t_input, T2, linewidth=2, label='T2')
-    axs3[1].plot(t_input, T3, linewidth=2, label='T3')
-    axs3[1].plot(t_input, T4, linewidth=2, label='T4')
+    # (2) RPM
+    axs3[1].plot(t_input, rpm1, linewidth=2, label='rpm1')
+    axs3[1].plot(t_input, rpm2, linewidth=2, label='rpm2')
+    axs3[1].plot(t_input, rpm3, linewidth=2, label='rpm3')
+    axs3[1].plot(t_input, rpm4, linewidth=2, label='rpm4')
     axs3[1].set_xlabel('Time [s]')
-    axs3[1].set_ylabel('Thrust [N]')
-    axs3[1].set_title('Motor Thrusts')
-    axs3[1].set_ylim(-0.1, 1.9)
+    axs3[1].set_ylabel('Revolutions per Minute')
+    axs3[1].set_title('Motor RPMs')
+    #axs3[1].set_ylim(-0.1, 1.5)
     axs3[1].grid(True)
     axs3[1].legend()
 

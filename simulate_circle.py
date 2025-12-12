@@ -212,11 +212,12 @@ def main():
     E_total = np.trapezoid(P_elec, t_input)
     print(E_total)
     
+    k = params.k
     k_tau = params.k_tau
-    omega1 = np.sqrt(T1/k_tau)
-    omega2 = np.sqrt(T2/k_tau)
-    omega3 = np.sqrt(T3/k_tau)
-    omega4 = np.sqrt(T4/k_tau)
+    omega1 = np.sqrt(T1/k)
+    omega2 = np.sqrt(T2/k)
+    omega3 = np.sqrt(T3/k)
+    omega4 = np.sqrt(T4/k)
     print('omega1: ', omega1[10])
     
     rpm1 = omega1*60/(2*np.pi)
