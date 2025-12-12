@@ -11,6 +11,7 @@ class QuadParams:
         self.Jx  = 1.3e-3      # kg m^2
         self.Jy  = 1.3e-3      # kg m^2
         self.Jz  = 2.6e-3      # kg m^2
+        self.k_tau = 8.0e-6
 
     def linear_matrices(self):
         """
