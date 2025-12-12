@@ -158,23 +158,7 @@ def main():
     F_phys = params.m * params.g + F   # interpret F as ΔF around hover
 
 
-    # -----------------------------
-    # Power + Energy (same style as hover: simple proxy model)
-    # Interpolate states onto t_input so shapes match
-    # -----------------------------
-    vz_i = np.interp(t_input, t, vz)
-    p_i  = np.interp(t_input, t, p)
-    q_i  = np.interp(t_input, t, q)
-    r_i  = np.interp(t_input, t, r)
-
-    # Power model (same idea as yours, just vectorized and shape-consistent)
-    power = np.abs(F) * np.abs(vz_i) \
-        + np.abs(tau_phi)   * np.abs(p_i) \
-        + np.abs(tau_theta) * np.abs(q_i) \
-        + np.abs(tau_psi)   * np.abs(r_i)
-
-    energy_cumulative = np.cumsum(power[:-1] * np.diff(t_input))
-    energy_cumulative = np.insert(energy_cumulative, 0, 0.0)    
+     
 
     # -----------------------------
     # Motor thrusts T1..T4 (best-effort mixer inversion)
@@ -198,6 +182,29 @@ def main():
         T_motors = np.vstack((F_phys/4, F_phys/4, F_phys/4, F_phys/4))
 
     T1, T2, T3, T4 = T_motors[0, :], T_motors[1, :], T_motors[2, :], T_motors[3, :]
+    
+        # -----------------------------
+    # NEW: Rotor-based power + energy (includes baseline hover power)
+    # Using actuator-disk / momentum theory proxy:
+    #   P_i ≈ T_i^(3/2) / sqrt(2 ρ A)
+    # Electrical power: P_elec = P_mech / η
+    # -----------------------------
+    rho = 1.225  # kg/m^3
+    R_rotor = getattr(params, "rotor_radius", 0.0635)  # m 
+    A_rotor = np.pi * R_rotor**2
+    eta = getattr(params, "eta", 0.7)  # overall efficiency (motor+ESC+prop)
+
+    def thrust_to_power(T):
+        T = np.maximum(T, 0.0)  # avoid negative thrust -> NaNs
+        return (T**1.5) / np.sqrt(2.0 * rho * A_rotor)
+
+    P_mech = thrust_to_power(T1) + thrust_to_power(T2) + thrust_to_power(T3) + thrust_to_power(T4)
+    P_elec = P_mech / eta
+
+    E_cumulative = np.cumsum(P_elec[:-1] * np.diff(t_input))
+    E_cumulative = np.insert(E_cumulative, 0, 0.0)
+    E_total = np.trapezoid(P_elec, t_input)
+
 
     # -----------------------------
     # FIGURE 1: 3D trajectory (own figure)
@@ -299,16 +306,16 @@ def main():
     axs3[1].legend()
 
     # (3) Power
-    axs3[2].plot(t_input, power, linewidth=2)
+    axs3[2].plot(t_input, P_elec, linewidth=2)
     axs3[2].set_xlabel('Time [s]')
-    axs3[2].set_ylabel('Power [W] (proxy)')
+    axs3[2].set_ylabel('Power [W] (rotor model)')
     axs3[2].set_title('Power')
     axs3[2].grid(True)
 
     # (4) Energy
-    axs3[3].plot(t_input, energy_cumulative, linewidth=2)
+    axs3[3].plot(t_input, E_cumulative, linewidth=2)
     axs3[3].set_xlabel('Time [s]')
-    axs3[3].set_ylabel('Energy [J] (proxy)')
+    axs3[3].set_ylabel('Energy [J] (rotor model)')
     axs3[3].set_title('Cumulative Energy')
     axs3[3].grid(True)
 

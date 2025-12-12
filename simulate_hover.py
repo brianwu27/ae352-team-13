@@ -103,14 +103,58 @@ def main():
     p_i  = np.interp(t_input, t, p)
     q_i  = np.interp(t_input, t, q)
     r_i  = np.interp(t_input, t, r)
+    
+        # -----------------------------
+    # Motor thrusts T1..T4 (mixer inversion, same idea as circle)
+    # -----------------------------
+    try:
+        L = params.L
+        k_tau = params.k_tau
 
-    # Power model (same idea as yours, just vectorized and shape-consistent)
-    power = np.abs(T_total) * np.abs(vz_i) \
-        + np.abs(tau_phi)   * np.abs(p_i) \
-        + np.abs(tau_theta) * np.abs(q_i) \
-        + np.abs(tau_psi)   * np.abs(r_i)
+        # Standard "plus" configuration mixer:
+        # [T_total]   [ 1   1   1   1 ] [T1]
+        # [tau_phi] = [ 0  -L   0  +L ] [T2]
+        # [tau_theta] [ -L  0  +L  0 ] [T3]
+        # [tau_psi]   [ k -k   k  -k ] [T4]
+        M = np.array([
+            [1.0,   1.0,   1.0,   1.0],
+            [0.0,  -L,     0.0,  +L  ],
+            [-L,    0.0,  +L,     0.0],
+            [k_tau, -k_tau, k_tau, -k_tau]
+        ])
 
-    energy = np.trapz(power, t_input)  # Total energy consumption
+        U = np.vstack((T_total, tau_phi, tau_theta, tau_psi))  # (4, N)
+        T_motors = np.linalg.solve(M, U)                       # (4, N)
+    except Exception:
+        # Fallback: equal split (still valid for symmetric hover)
+        T_motors = np.vstack((T_total/4, T_total/4, T_total/4, T_total/4))
+
+    T1, T2, T3, T4 = T_motors[0, :], T_motors[1, :], T_motors[2, :], T_motors[3, :]
+
+    # -----------------------------
+    # Rotor-based power + energy (includes baseline hover power)
+    # Actuator disk / momentum theory proxy:
+    #   P_i ≈ T_i^(3/2) / sqrt(2 ρ A)
+    # Electrical: P_elec = P_mech / η
+    # -----------------------------
+    rho = 1.225  # kg/m^3
+    R_rotor = getattr(params, "rotor_radius", 0.0635)  # m (default ~5" props)
+    A_rotor = np.pi * R_rotor**2
+    eta = getattr(params, "eta", 0.7)  # overall efficiency (motor+ESC+prop)
+
+    def thrust_to_power(T):
+        T = np.maximum(T, 0.0)  # avoid negative thrust -> NaNs
+        return (T**1.5) / np.sqrt(2.0 * rho * A_rotor)
+
+    P_mech = thrust_to_power(T1) + thrust_to_power(T2) + thrust_to_power(T3) + thrust_to_power(T4)
+    P_elec = P_mech / eta
+
+    E_cumulative = np.cumsum(P_elec[:-1] * np.diff(t_input))
+    E_cumulative = np.insert(E_cumulative, 0, 0.0)
+    E_total = np.trapezoid(P_elec, t_input)
+
+
+    
 
         # ------------------------------------------------------
     # Plotting - 3-figure grouped layout
@@ -119,10 +163,6 @@ def main():
     # Common derived quantities
     radius = np.sqrt(px**2 + py**2)
     speed  = np.sqrt(vx**2 + vy**2 + vz**2)
-
-    # Cumulative energy vs time
-    energy_cumulative = np.cumsum(power[:-1] * np.diff(t_input))
-    energy_cumulative = np.insert(energy_cumulative, 0, 0)
 
     # -----------------------------
     # FIGURE 1: 3D trajectory (own figure)
@@ -206,6 +246,7 @@ def main():
     ax_u.set_xlabel('Time [s]')
     ax_u.set_ylabel('Thrust [N]')
     ax_u.set_title('Inputs u(t)')
+    ax_u.set_ylim(-1, 12)
     ax_u.grid(True)
 
     ax_u2 = ax_u.twinx()
@@ -218,13 +259,8 @@ def main():
     lines1, labels1 = ax_u.get_legend_handles_labels()
     lines2, labels2 = ax_u2.get_legend_handles_labels()
     ax_u2.legend(lines1 + lines2, labels1 + labels2, loc='best')
-
-    # (1) Motor thrusts (hover: equal split)
-    T1 = T_total / 4.0
-    T2 = T_total / 4.0
-    T3 = T_total / 4.0
-    T4 = T_total / 4.0
-
+    
+    # (1) Motor thrusts
     axs3[1].plot(t_input, T1, linewidth=2, label='T1')
     axs3[1].plot(t_input, T2, linewidth=2, label='T2')
     axs3[1].plot(t_input, T3, linewidth=2, label='T3')
@@ -232,22 +268,29 @@ def main():
     axs3[1].set_xlabel('Time [s]')
     axs3[1].set_ylabel('Thrust [N]')
     axs3[1].set_title('Motor Thrusts')
+    axs3[1].set_ylim(-0.25, 3)
     axs3[1].grid(True)
     axs3[1].legend()
 
+
     # (2) Power
-    axs3[2].plot(t_input, power, linewidth=2)
+    # (2) Power (rotor-based electrical power)
+    axs3[2].plot(t_input, P_elec, linewidth=2)
     axs3[2].set_xlabel('Time [s]')
-    axs3[2].set_ylabel('Power [W] (proxy)')
-    axs3[2].set_title('Power')
+    axs3[2].set_ylabel('Power [W]')
+    axs3[2].set_title('Electrical Power (rotor-based)')
+    axs3[2].set_ylim(-10, 180)
     axs3[2].grid(True)
 
+
     # (3) Energy
-    axs3[3].plot(t_input, energy_cumulative, linewidth=2)
+    axs3[3].plot(t_input, E_cumulative, linewidth=2)
     axs3[3].set_xlabel('Time [s]')
-    axs3[3].set_ylabel('Energy [J] (proxy)')
-    axs3[3].set_title('Cumulative Energy')
+    axs3[3].set_ylabel('Energy [J]')
+    axs3[3].set_title('Cumulative Electrical Energy')
+    axs3[3].set_ylim(-50, 600)
     axs3[3].grid(True)
+
 
     fig3.suptitle('Control Effort and Energy', fontsize=14)
     fig3.tight_layout()
@@ -284,9 +327,9 @@ def main():
     print(f"  Max |τψ|: {np.max(np.abs(tau_psi))*1000:.4f} mN·m")
     
     print("\nENERGY:")
-    print(f"  Total energy consumed: {energy:.2f} J")
-    print(f"  Average power: {np.mean(power):.2f} W")
-    print(f"  Peak power: {np.max(power):.2f} W")
+    print(f"  Total energy consumed: {E_total:.2f} J")
+    print(f"  Average power: {np.mean(P_elec):.2f} W")
+    print(f"  Peak power: {np.max(P_elec):.2f} W")
     
     print("\n" + "="*60)
 
