@@ -281,12 +281,14 @@ def main():
     ax_u.set_xlabel('Time [s]')
     ax_u.set_ylabel('Thrust [N]')
     ax_u.set_title('Inputs u(t)')
+    ax_u.set_ylim(-0.5, 6)
     ax_u.grid(True)
 
     ax_u2 = ax_u.twinx()
     ax_u2.plot(t_input, tau_phi,   linewidth=2, linestyle='--', label='τφ')
     ax_u2.plot(t_input, tau_theta, linewidth=2, linestyle='--', label='τθ')
     ax_u2.plot(t_input, tau_psi,   linewidth=2, linestyle='--', label='τψ')
+    ax_u2.set_ylim(-0.1, 0.1)
     ax_u2.set_ylabel('Torque [N·m]')
 
     # Combined legend
@@ -302,6 +304,7 @@ def main():
     axs3[1].set_xlabel('Time [s]')
     axs3[1].set_ylabel('Thrust [N]')
     axs3[1].set_title('Motor Thrusts')
+    axs3[1].set_ylim(-0.1, 1.5)
     axs3[1].grid(True)
     axs3[1].legend()
 
@@ -310,6 +313,7 @@ def main():
     axs3[2].set_xlabel('Time [s]')
     axs3[2].set_ylabel('Power [W] (rotor model)')
     axs3[2].set_title('Power')
+    axs3[2].set_ylim(-5, 50)
     axs3[2].grid(True)
 
     # (4) Energy
@@ -317,6 +321,7 @@ def main():
     axs3[3].set_xlabel('Time [s]')
     axs3[3].set_ylabel('Energy [J] (rotor model)')
     axs3[3].set_title('Cumulative Energy')
+    axs3[3].set_ylim(-100, 2500)
     axs3[3].grid(True)
 
     fig3.suptitle('Control Effort and Energy', fontsize=14)

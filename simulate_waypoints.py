@@ -14,19 +14,12 @@ v_asc   = 0.5    # m/s vertical ascent speed
 v_horiz = 1.0    # m/s horizontal segments
 v_desc  = -0.01  # m/s downward (landing) speed, magnitude 1 cm/s
 
-# ascent: 0 -> 1 m at 0.5 m/s -> 2 s
 t1 = 2.0
-# first straight line: 5 m at 1 m/s -> 5 s
 t2 = t1 + 5.0    # 7
-# hover 1: 2 s
 t3 = t2 + 2.0    # 9
-# yaw 90 deg left over 3 s
 t4 = t3 + 3.0    # 12
-# second straight line: 5 m at 1 m/s
 t5 = t4 + 5.0    # 17
-# hover 2: 2 s
 t6 = t5 + 2.0    # 19
-# descent: from 1 m to 0 m at 0.01 m/s -> 100 s
 t7 = t6 + 100.0  # 119
 
 
@@ -35,11 +28,8 @@ t7 = t6 + 100.0  # 119
 # -----------------------------
 def waypoint_x_ref(t: float) -> np.ndarray:
     """
-    Reference state x_ref(t) for the waypoint mission.
-
     State: x = [px, py, pz, vx, vy, vz, φ, θ, ψ, p, q, r]^T
     """
-    # initialize
     px = py = pz = 0.0
     vx = vy = vz = 0.0
     phi = theta = 0.0
@@ -47,18 +37,14 @@ def waypoint_x_ref(t: float) -> np.ndarray:
     p = q = r = 0.0
 
     if t < t1:
-        # Phase 1: vertical ascent from z=0 to z=1
         pz = v_asc * t
-        if pz > 1.0:
-            pz = 1.0
+        pz = min(pz, 1.0)
         vz = v_asc
 
     elif t < t2:
-        # Phase 2: move in +x for 5 m at 1 m/s, at z = 1
         tau = t - t1
         px = v_horiz * tau
-        if px > 5.0:
-            px = 5.0
+        px = min(px, 5.0)
         py = 0.0
         pz = 1.0
         vx = v_horiz
@@ -66,26 +52,22 @@ def waypoint_x_ref(t: float) -> np.ndarray:
         vz = 0.0
 
     elif t < t3:
-        # Phase 3: hover at (5, 0, 1)
         px, py, pz = 5.0, 0.0, 1.0
 
     elif t < t4:
-        # Phase 4: yaw 90 deg to the left, position fixed
         px, py, pz = 5.0, 0.0, 1.0
         psi0 = 0.0
         psi_f = np.pi / 2.0
         tau = t - t3
         T_yaw = t4 - t3
         psi = psi0 + (psi_f - psi0) * tau / T_yaw
-        r = (psi_f - psi0) / T_yaw  # constant yaw rate during maneuver
+        r = (psi_f - psi0) / T_yaw
 
     elif t < t5:
-        # Phase 5: move in +y for 5 m at 1 m/s, at z = 1
         px = 5.0
         tau = t - t4
         py = v_horiz * tau
-        if py > 5.0:
-            py = 5.0
+        py = min(py, 5.0)
         pz = 1.0
         vx = 0.0
         vy = v_horiz
@@ -93,40 +75,25 @@ def waypoint_x_ref(t: float) -> np.ndarray:
         psi = np.pi / 2.0
 
     elif t < t6:
-        # Phase 6: hover at (5, 5, 1), yaw = 90 deg
         px, py, pz = 5.0, 5.0, 1.0
         psi = np.pi / 2.0
 
     elif t < t7:
-        # Phase 7: slow vertical landing with speed 0.01 m/s
         px, py = 5.0, 5.0
         tau = t - t6
         pz = 1.0 + v_desc * tau
-        if pz < 0.0:
-            pz = 0.0
+        pz = max(pz, 0.0)
         vz = v_desc
         psi = np.pi / 2.0
 
     else:
-        # After landing: stay on the ground at final position
         px, py, pz = 5.0, 5.0, 0.0
         psi = np.pi / 2.0
 
-    x_ref = np.array([
-        px, py, pz,
-        vx, vy, vz,
-        phi, theta, psi,
-        p, q, r
-    ])
-
-    return x_ref
+    return np.array([px, py, pz, vx, vy, vz, phi, theta, psi, p, q, r])
 
 
 def waypoint_x_ref_dot(t: float) -> np.ndarray:
-    """
-    Time derivative of x_ref(t) for feed-forward computation.
-    """
-    # initialize
     px_dot = py_dot = pz_dot = 0.0
     vx_dot = vy_dot = vz_dot = 0.0
     phi_dot = theta_dot = 0.0
@@ -134,58 +101,39 @@ def waypoint_x_ref_dot(t: float) -> np.ndarray:
     p_dot = q_dot = r_dot = 0.0
 
     if t < t1:
-        # Phase 1: ascent
-        px_dot = 0.0
-        py_dot = 0.0
         pz_dot = v_asc
-        # velocities are constant => accelerations zero
 
     elif t < t2:
-        # Phase 2: +x motion
         px_dot = v_horiz
-        py_dot = 0.0
-        pz_dot = 0.0
 
     elif t < t3:
-        # Phase 3: hover
-        pass  # all zeros
+        pass
 
     elif t < t4:
-        # Phase 4: yaw 90 deg
         psi0 = 0.0
         psi_f = np.pi / 2.0
         T_yaw = t4 - t3
         psi_dot = (psi_f - psi0) / T_yaw
-        # r is the body yaw rate; in the linear model: psi̇ = r
         r_dot = 0.0
 
     elif t < t5:
-        # Phase 5: +y motion
-        px_dot = 0.0
         py_dot = v_horiz
-        pz_dot = 0.0
 
     elif t < t6:
-        # Phase 6: hover
         pass
 
     elif t < t7:
-        # Phase 7: descent
         pz_dot = v_desc
-        # vz is constant => vz_dot = 0
 
     else:
-        # Landed: everything zero
         pass
 
-    x_ref_dot = np.array([
+    return np.array([
         px_dot, py_dot, pz_dot,
         vx_dot, vy_dot, vz_dot,
         phi_dot, theta_dot, psi_dot,
         p_dot, q_dot, r_dot
     ])
-
-    return x_ref_dot
 
 
 # -----------------------------
@@ -194,22 +142,27 @@ def waypoint_x_ref_dot(t: float) -> np.ndarray:
 def make_closed_loop_rhs(A, B, K):
     """
     ẋ = A x + B (u_ref(t) - K (x - x_ref(t)))
-    with u_ref chosen so that A x_ref + B u_ref ≈ ẋ_ref.
+    where u_ref solves (least squares): ẋ_ref ≈ A x_ref + B u_ref
     """
+    input_history = []
+
     def f(t, x):
         x_ref = waypoint_x_ref(t)
         x_ref_dot = waypoint_x_ref_dot(t)
 
         rhs = x_ref_dot - A @ x_ref
-        u_ref, *_ = la.lstsq(B, rhs, rcond=None)  # 4x1 feed-forward
+        u_ref, *_ = la.lstsq(B, rhs, rcond=None)  # (4,)
 
         e = x - x_ref
         du = -K @ e
         u = u_ref + du
 
+        input_history.append((t, u.copy()))
+
         xdot = A @ x + B @ u
         return xdot
 
+    f.input_history = input_history
     return f
 
 
@@ -221,10 +174,8 @@ def main():
     A, B = params.linear_matrices()
     K = params.lqr_gain()
 
-    # Start at ground, zero everything
     x0 = np.zeros(12)
 
-    # Simulate from 0 to a bit past t7
     t_span = (0.0, t7 + 5.0)
     t_eval = np.linspace(t_span[0], t_span[1], 4001)
 
@@ -242,18 +193,214 @@ def main():
     t = sol.t
     x = sol.y
 
-    px   = x[0, :]
-    py   = x[1, :]
-    pz   = x[2, :]
-    vx   = x[3, :]
-    vy   = x[4, :]
-    vz   = x[5, :]
-    phi  = x[6, :]
+    px    = x[0, :]
+    py    = x[1, :]
+    pz    = x[2, :]
+    vx    = x[3, :]
+    vy    = x[4, :]
+    vz    = x[5, :]
+    phi   = x[6, :]
     theta = x[7, :]
-    psi  = x[8, :]
+    psi   = x[8, :]
+    p     = x[9, :]
+    q     = x[10, :]
+    r     = x[11, :]
 
     speed_xy = np.sqrt(vx**2 + vy**2)
+
+    # -----------------------------
+    # Inputs u(t) from logged history
+    # -----------------------------
+    t_input   = np.array([item[0] for item in f_cl.input_history])
+    u_history = np.array([item[1] for item in f_cl.input_history])
+
+    F         = u_history[:, 0]   # total thrust input (as modeled in your linear system)
+    tau_phi   = u_history[:, 1]
+    tau_theta = u_history[:, 2]
+    tau_psi   = u_history[:, 3]
     
+    F_phys = params.m * params.g + F
+
+    # -----------------------------
+    # Motor thrusts T1..T4 (mixer inversion if params has L, k_tau)
+    # -----------------------------
+    try:
+        L = params.L
+        k_tau = params.k_tau
+
+        M = np.array([
+            [1.0,   1.0,   1.0,   1.0],
+            [0.0,  -L,     0.0,  +L  ],
+            [-L,    0.0,  +L,     0.0],
+            [k_tau, -k_tau, k_tau, -k_tau]
+        ])
+
+        U = np.vstack((F_phys, tau_phi, tau_theta, tau_psi))  # (4, N)
+        T_motors = np.linalg.solve(M, U)                 # (4, N)
+    except Exception:
+        T_motors = np.vstack((F_phys/4, F_phys/4, F_phys/4, F_phys/4))
+
+    T1, T2, T3, T4 = T_motors[0, :], T_motors[1, :], T_motors[2, :], T_motors[3, :]
+
+    # -----------------------------
+    # Rotor-based electrical power + energy
+    # (actuator disk proxy, includes baseline because it uses absolute thrust)
+    # -----------------------------
+    rho = 1.225  # kg/m^3
+    R_rotor = getattr(params, "rotor_radius", 0.0635)  # m
+    A_rotor = np.pi * R_rotor**2
+    eta = getattr(params, "eta", 0.7)
+
+    def thrust_to_power(T):
+        T = np.maximum(T, 0.0)
+        return (T**1.5) / np.sqrt(2.0 * rho * A_rotor)
+
+    P_mech = thrust_to_power(T1) + thrust_to_power(T2) + thrust_to_power(T3) + thrust_to_power(T4)
+    P_elec = P_mech / eta
+
+    E_cumulative = np.cumsum(P_elec[:-1] * np.diff(t_input))
+    E_cumulative = np.insert(E_cumulative, 0, 0.0)
+    E_total = np.trapezoid(P_elec, t_input)
+
+    # -----------------------------
+    # FIGURE 1: 3D trajectory (own figure)
+    # -----------------------------
+    fig1 = plt.figure(figsize=(8, 6))
+    ax = fig1.add_subplot(111, projection='3d')
+    ax.plot(px, py, pz, linewidth=2, label='Trajectory')
+
+    waypoints = np.array([
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [5.0, 0.0, 1.0],
+        [5.0, 5.0, 1.0],
+        [5.0, 5.0, 0.0],
+    ])
+    ax.scatter(waypoints[:, 0], waypoints[:, 1], waypoints[:, 2], c='red', s=40, label='Waypoints')
+
+    ax.set_xlabel('x [m]')
+    ax.set_ylabel('y [m]')
+    ax.set_zlabel('z [m]')
+    ax.set_title('3D Position (Waypoints)')
+    ax.grid(True)
+    ax.legend()
+    fig1.tight_layout()
+
+    # -----------------------------
+    # FIGURE 2: 12 DOFs grouped (2x2)
+    # -----------------------------
+    fig2, axs = plt.subplots(2, 2, figsize=(14, 9), sharex=True)
+    axs = axs.ravel()
+
+    axs[0].plot(t, px, linewidth=2, label='px')
+    axs[0].plot(t, py, linewidth=2, label='py')
+    axs[0].plot(t, pz, linewidth=2, label='pz')
+    axs[0].axhline(1.0, linestyle='--', alpha=0.4, label='z=1 m')
+    axs[0].set_ylabel('Position [m]')
+    axs[0].set_title('Position')
+    axs[0].set_ylim(-0.5, 6)
+    axs[0].grid(True)
+    axs[0].legend()
+
+    axs[1].plot(t, vx, linewidth=2, label='vx')
+    axs[1].plot(t, vy, linewidth=2, label='vy')
+    axs[1].plot(t, vz, linewidth=2, label='vz')
+    axs[1].axhline(0.0, linestyle='--', alpha=0.3)
+    axs[1].set_ylabel('Velocity [m/s]')
+    axs[1].set_title('Velocity')
+    axs[1].set_ylim(-0.5, 1.4)
+    axs[1].grid(True)
+    axs[1].legend()
+
+    axs[2].plot(t, np.rad2deg(phi), linewidth=2, label='φ (roll)')
+    axs[2].plot(t, np.rad2deg(theta), linewidth=2, label='θ (pitch)')
+    axs[2].plot(t, np.rad2deg(psi), linewidth=2, label='ψ (yaw)')
+    axs[2].axhline(0.0, linestyle='--', alpha=0.3)
+    axs[2].set_xlabel('Time [s]')
+    axs[2].set_ylabel('Angle [deg]')
+    axs[2].set_title('Euler Angles')
+    axs[2].set_ylim(-100, 100)
+    axs[2].grid(True)
+    axs[2].legend()
+
+    axs[3].plot(t, np.rad2deg(p), linewidth=2, label='p (roll rate)')
+    axs[3].plot(t, np.rad2deg(q), linewidth=2, label='q (pitch rate)')
+    axs[3].plot(t, np.rad2deg(r), linewidth=2, label='r (yaw rate)')
+    axs[3].axhline(0.0, linestyle='--', alpha=0.3)
+    axs[3].set_xlabel('Time [s]')
+    axs[3].set_ylabel('Rate [deg/s]')
+    axs[3].set_title('Angular Rates')
+    axs[3].set_ylim(-200, 200)
+    axs[3].grid(True)
+    axs[3].legend()
+
+    fig2.suptitle('State Time Histories (12 DOF)', fontsize=14)
+    fig2.tight_layout()
+    fig2.subplots_adjust(top=0.92)
+
+    # -----------------------------
+    # FIGURE 3: Inputs + Motor Thrusts + Power + Energy (2x2)
+    # -----------------------------
+    fig3, axs3 = plt.subplots(2, 2, figsize=(14, 9))
+    axs3 = axs3.ravel()
+
+    # (0) Inputs u(t): thrust + torques (twin y-axis so torques are visible)
+    ax_u = axs3[0]
+    ax_u.plot(t_input, F_phys, linewidth=2, label='F (total thrust)')
+    ax_u.set_xlabel('Time [s]')
+    ax_u.set_ylabel('Thrust [N]')
+    ax_u.set_title('Inputs u(t)')
+    ax_u.set_ylim(-0.5, 8)
+    ax_u.grid(True)
+
+    ax_u2 = ax_u.twinx()
+    ax_u2.plot(t_input, tau_phi,   linewidth=2, linestyle='--', label='τφ')
+    ax_u2.plot(t_input, tau_theta, linewidth=2, linestyle='--', label='τθ')
+    ax_u2.plot(t_input, tau_psi,   linewidth=2, linestyle='--', label='τψ')
+    ax_u2.set_ylim(-3300, 3300)
+    ax_u2.set_ylabel('Torque [N·m]')
+
+    lines1, labels1 = ax_u.get_legend_handles_labels()
+    lines2, labels2 = ax_u2.get_legend_handles_labels()
+    ax_u2.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+    # (1) Motor thrusts
+    axs3[1].plot(t_input, T1, linewidth=2, label='T1')
+    axs3[1].plot(t_input, T2, linewidth=2, label='T2')
+    axs3[1].plot(t_input, T3, linewidth=2, label='T3')
+    axs3[1].plot(t_input, T4, linewidth=2, label='T4')
+    axs3[1].set_xlabel('Time [s]')
+    axs3[1].set_ylabel('Thrust [N]')
+    axs3[1].set_title('Motor Thrusts')
+    axs3[1].set_ylim(-0.1, 1.9)
+    axs3[1].grid(True)
+    axs3[1].legend()
+
+    # (2) Electrical power (rotor-based)
+    axs3[2].plot(t_input, P_elec, linewidth=2)
+    axs3[2].set_xlabel('Time [s]')
+    axs3[2].set_ylabel('Power [W]')
+    axs3[2].set_title('Electrical Power (rotor-based)')
+    axs3[2].set_ylim(-5, 80)
+    axs3[2].grid(True)
+
+    # (3) Cumulative energy
+    axs3[3].plot(t_input, E_cumulative, linewidth=2)
+    axs3[3].set_xlabel('Time [s]')
+    axs3[3].set_ylabel('Energy [J]')
+    axs3[3].set_title('Cumulative Electrical Energy')
+    axs3[3].set_ylim(-500, 5000)
+    axs3[3].grid(True)
+
+    fig3.suptitle('Control Effort and Energy', fontsize=14)
+    fig3.tight_layout()
+    fig3.subplots_adjust(top=0.92)
+
+    plt.show()
+
+    # -----------------------------
+    # Some stats
+    # -----------------------------
     mask1 = (t >= t1) & (t <= t2)
     avg_speed_seg1 = np.trapezoid(np.sqrt(vx[mask1]**2 + vy[mask1]**2), t[mask1]) / (t2 - t1)
     print(f"Average horizontal speed segment 1: {avg_speed_seg1:.3f} m/s")
@@ -262,100 +409,15 @@ def main():
     avg_speed_seg2 = np.trapezoid(np.sqrt(vx[mask2]**2 + vy[mask2]**2), t[mask2]) / (t5 - t4)
     print(f"Average horizontal speed segment 2: {avg_speed_seg2:.3f} m/s")
 
-    # ---------- plots ----------
-    plt.figure(figsize=(13, 8))
-
-    # 3D position
-    ax1 = plt.subplot(2, 3, 1, projection='3d')
-    ax1.plot(px, py, pz, label='Trajectory')
-
-    # --- Add waypoint red dots ---
-    waypoints = np.array([
-        [0.0, 0.0, 0.0],   # launch point
-        [0.0, 0.0, 1.0],   # end of ascent
-        [5.0, 0.0, 1.0],   # end of first straight segment
-        [5.0, 5.0, 1.0],   # end of second straight segment
-        [5.0, 5.0, 0.0],   # landing point
-    ])
-    ax1.scatter(
-        waypoints[:,0],
-        waypoints[:,1],
-        waypoints[:,2],
-        c='red',
-        s=40,
-        label='Waypoints'
-    )
-    # -----------------------------
-
-    ax1.set_xlabel('x [m]')
-    ax1.set_ylabel('y [m]')
-    ax1.set_zlabel('z [m]')
-    ax1.set_title('3D Position')
-    ax1.grid(True)
-    ax1.legend()
-
-
-    # XY path
-    ax2 = plt.subplot(2, 3, 2)
-    ax2.plot(px, py, label='Trajectory')
-    ax2.set_xlabel('x [m]')
-    ax2.set_ylabel('y [m]')
-    ax2.set_title('XY Path')
-    ax2.grid(True)
-    ax2.legend()
-    ax2.set_aspect('equal', 'box')
-
-    # Altitude vs time
-    ax3 = plt.subplot(2, 3, 3)
-    ax3.plot(t, pz, label='z(t)')
-    ax3.axhline(1.0, color='r', linestyle='--', alpha=0.5, label='1 m')
-    ax3.set_xlabel('Time [s]')
-    ax3.set_ylabel('Altitude [m]')
-    ax3.set_title('Altitude vs Time')
-    ax3.grid(True)
-    ax3.legend()
-
-    # Horizontal speed
-    ax4 = plt.subplot(2, 3, 4)
-    ax4.plot(t, speed_xy, label='|v_xy|')
-    ax4.axhline(1.0, color='r', linestyle='--', alpha=0.5, label='1 m/s target')
-    ax4.set_xlabel('Time [s]')
-    ax4.set_ylabel('Speed [m/s]')
-    ax4.set_title('Horizontal Speed')
-    ax4.grid(True)
-    ax4.legend()
-
-    # Vertical speed
-    ax5 = plt.subplot(2, 3, 5)
-    ax5.plot(t, vz, label='v_z')
-    ax5.axhline(v_desc, color='r', linestyle='--', alpha=0.5,
-                label='Landing ref: -0.01 m/s')
-    ax5.set_xlabel('Time [s]')
-    ax5.set_ylabel('v_z [m/s]')
-    ax5.set_title('Vertical Speed')
-    ax5.grid(True)
-    ax5.legend()
-
-    # Yaw angle
-    ax6 = plt.subplot(2, 3, 6)
-    ax6.plot(t, np.rad2deg(psi), label='ψ (deg)')
-    ax6.set_xlabel('Time [s]')
-    ax6.set_ylabel('Yaw [deg]')
-    ax6.set_title('Yaw vs Time')
-    ax6.grid(True)
-    ax6.legend()
-
-    plt.tight_layout()
-
-    # Some stats at end of flight
     print("\n=== Waypoint Mission Stats ===")
     print(f"Final position: x={px[-1]:.3f} m, y={py[-1]:.3f} m, z={pz[-1]:.3f} m")
-    print(f"Final vertical speed: v_z={vz[-1]:.5f} m/s "
-          "(should be ≈ -0.01 or smaller magnitude)")
-    print(f"Max |v_z| during final descent segment: "
-          f"{np.max(np.abs(vz[t > t6])):.5f} m/s")
+    print(f"Final vertical speed: v_z={vz[-1]:.5f} m/s")
+    print(f"Max |v_z| during final descent segment: {np.max(np.abs(vz[t > t6])):.5f} m/s")
 
-    plt.show()
+    print("\nENERGY:")
+    print(f"  Total energy consumed: {E_total:.2f} J")
+    print(f"  Average power: {np.mean(P_elec):.2f} W")
+    print(f"  Peak power: {np.max(P_elec):.2f} W")
 
 
 if __name__ == "__main__":
