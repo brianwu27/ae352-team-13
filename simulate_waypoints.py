@@ -7,9 +7,7 @@ from scipy.integrate import solve_ivp
 from dynamics import QuadParams
 
 
-# -----------------------------
 # Phase timing
-# -----------------------------
 v_asc   = 0.5    # m/s vertical ascent speed
 v_horiz = 1.0    # m/s horizontal segments
 v_desc  = -0.01  # m/s downward (landing) speed, magnitude 1 cm/s
@@ -23,13 +21,8 @@ t6 = t5 + 2.0    # 19
 t7 = t6 + 100.0  # 119
 
 
-# -----------------------------
 # Reference trajectory
-# -----------------------------
-def waypoint_x_ref(t: float) -> np.ndarray:
-    """
-    State: x = [px, py, pz, vx, vy, vz, φ, θ, ψ, p, q, r]^T
-    """
+def waypoint_x_ref(t):
     px = py = pz = 0.0
     vx = vy = vz = 0.0
     phi = theta = 0.0
@@ -93,7 +86,7 @@ def waypoint_x_ref(t: float) -> np.ndarray:
     return np.array([px, py, pz, vx, vy, vz, phi, theta, psi, p, q, r])
 
 
-def waypoint_x_ref_dot(t: float) -> np.ndarray:
+def waypoint_x_ref_dot(t):
     px_dot = py_dot = pz_dot = 0.0
     vx_dot = vy_dot = vz_dot = 0.0
     phi_dot = theta_dot = 0.0
@@ -136,14 +129,8 @@ def waypoint_x_ref_dot(t: float) -> np.ndarray:
     ])
 
 
-# -----------------------------
-# Closed-loop dynamics
-# -----------------------------
+# Build f = x_dot = Ax + Bu
 def make_closed_loop_rhs(A, B, K):
-    """
-    ẋ = A x + B (u_ref(t) - K (x - x_ref(t)))
-    where u_ref solves (least squares): ẋ_ref ≈ A x_ref + B u_ref
-    """
     input_history = []
 
     def f(t, x):
@@ -166,9 +153,7 @@ def make_closed_loop_rhs(A, B, K):
     return f
 
 
-# -----------------------------
-# Simulation + plotting
-# -----------------------------
+# Simulation and plotting
 def main():
     params = QuadParams()
     A, B = params.linear_matrices()
@@ -205,8 +190,6 @@ def main():
     p     = x[9, :]
     q     = x[10, :]
     r     = x[11, :]
-
-    speed_xy = np.sqrt(vx**2 + vy**2)
 
     # -----------------------------
     # Inputs u(t) from logged history
@@ -280,21 +263,6 @@ def main():
     rpm3 = omega3*60/(2*np.pi)
     rpm4 = omega4*60/(2*np.pi)
     
-    torque_motor1 = P_mech1/omega1
-    torque_motor2 = P_mech2/omega2
-    torque_motor3 = P_mech3/omega3
-    torque_motor4 = P_mech4/omega4
-    print('motor torque: ', torque_motor1[10])
-    
-    current1 = torque_motor1/k_tau
-    current2 = torque_motor2/k_tau
-    current3 = torque_motor3/k_tau
-    current4 = torque_motor4/k_tau
-    current_total = current1 + current2 + current3 + current4
-    print(current_total[10])
-    
-    battery_consumption = np.trapezoid(current_total, t_input) # [Ah]
-    print(battery_consumption)
 
     # -----------------------------
     # FIGURE 1: 3D trajectory (own figure)
@@ -418,7 +386,7 @@ def main():
     axs3[2].set_ylim(-5, 80)
     axs3[2].grid(True)
 
-    # (3) Cumulative energy
+    # Cumulative energy
     axs3[3].plot(t_input, E_cumulative, linewidth=2)
     axs3[3].set_xlabel('Time [s]', fontsize=14)
     axs3[3].set_ylabel('Energy [J]', fontsize=14)
@@ -431,27 +399,6 @@ def main():
     fig3.subplots_adjust(top=0.92)
 
     plt.show()
-
-    # -----------------------------
-    # Some stats
-    # -----------------------------
-    mask1 = (t >= t1) & (t <= t2)
-    avg_speed_seg1 = np.trapezoid(np.sqrt(vx[mask1]**2 + vy[mask1]**2), t[mask1]) / (t2 - t1)
-    print(f"Average horizontal speed segment 1: {avg_speed_seg1:.3f} m/s")
-
-    mask2 = (t >= t4) & (t <= t5)
-    avg_speed_seg2 = np.trapezoid(np.sqrt(vx[mask2]**2 + vy[mask2]**2), t[mask2]) / (t5 - t4)
-    print(f"Average horizontal speed segment 2: {avg_speed_seg2:.3f} m/s")
-
-    print("\n=== Waypoint Mission Stats ===")
-    print(f"Final position: x={px[-1]:.3f} m, y={py[-1]:.3f} m, z={pz[-1]:.3f} m")
-    print(f"Final vertical speed: v_z={vz[-1]:.5f} m/s")
-    print(f"Max |v_z| during final descent segment: {np.max(np.abs(vz[t > t6])):.5f} m/s")
-
-    print("\nENERGY:")
-    print(f"  Total energy consumed: {E_total:.2f} J")
-    print(f"  Average power: {np.mean(P_elec):.2f} W")
-    print(f"  Peak power: {np.max(P_elec):.2f} W")
 
 
 if __name__ == "__main__":

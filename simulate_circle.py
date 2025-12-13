@@ -7,24 +7,20 @@ from scipy.integrate import solve_ivp
 from dynamics import QuadParams
 
 
-# -----------------------------
-# Reference trajectory
-# -----------------------------
-def circle_x_ref(t: float) -> np.ndarray:
-    """
-    Reference state for a circle of radius 2 m at 0.5 m/s,
-    altitude 1 m, centered at the origin.
+def circle_x_ref(t):
+    # Reference state for a circle of radius 2 m at 0.5 m/s,
+    # altitude 1 m, centered at the origin.
 
-    x = [px, py, pz, vx, vy, vz, φ, θ, ψ, p, q, r]^T
-    """
-    R = 2.0       # m
-    v = 0.5       # m/s
-    omega = v / R # rad/s
+    R = 2.0       # radius 
+    v = 0.5       # velocity
+    omega = v/R # angular velocity
 
-    px = R * np.cos(omega * t)
-    py = R * np.sin(omega * t)
+    # positions w/r/t time
+    px = R*np.cos(omega*t)
+    py = R*np.sin(omega*t)
     pz = 1.0
 
+    # velocities w/r/t time
     vx = -R * omega * np.sin(omega * t)
     vy =  R * omega * np.cos(omega * t)
     vz = 0.0
@@ -36,20 +32,19 @@ def circle_x_ref(t: float) -> np.ndarray:
     x_ref[3] = vx
     x_ref[4] = vy
     x_ref[5] = vz
-    # φ, θ, ψ, p, q, r remain 0
+    # all attitude parameters remain 0
+    
     return x_ref
 
 
-def circle_x_ref_dot(t: float) -> np.ndarray:
-    """
-    Time derivative of the reference state.
-    Needed for feed-forward input u_ref.
-    """
+def circle_x_ref_dot(t):
+    # Time derivative of the reference state
+    
     R = 2.0
     v = 0.5
     omega = v / R
 
-    # velocities (same as vx, vy above)
+    # velocities
     vx = -R * omega * np.sin(omega * t)
     vy =  R * omega * np.cos(omega * t)
     vz = 0.0
@@ -60,32 +55,28 @@ def circle_x_ref_dot(t: float) -> np.ndarray:
     az = 0.0
 
     x_ref_dot = np.zeros(12)
-    x_ref_dot[0:3] = [vx,  vy,  vz]
-    x_ref_dot[3:6] = [ax,  ay,  az]
+    x_ref_dot[0:3] = [vx, vy, vz]
+    x_ref_dot[3:6] = [ax, ay, az]
     # rest remain 0
+    
     return x_ref_dot
 
 
-def make_closed_loop_rhs(A, B, K):
-    """
-    f(t, x) for:
-        ẋ = A x + B u
-        u = u_ref(t) - K (x - x_ref(t))
-    """
-    input_history = []  # <-- log (t, u)
+def make_closed_loop_rhs(A, B, K):      # Build f = x_dot = Ax + Bu
+    input_history = []
 
     def f(t, x):
         x_ref = circle_x_ref(t)
         x_ref_dot = circle_x_ref_dot(t)
 
         rhs = x_ref_dot - A @ x_ref
-        u_ref, *_ = la.lstsq(B, rhs, rcond=None)  # shape (4,)
+        u_ref, *_ = la.lstsq(B, rhs, rcond=None)
 
         e = x - x_ref
         du = -K @ e
         u = u_ref + du
 
-        input_history.append((t, u.copy()))  # <-- log inputs for plots
+        input_history.append((t, u.copy()))
 
         xdot = A @ x + B @ u
         return xdot
@@ -94,13 +85,13 @@ def make_closed_loop_rhs(A, B, K):
     return f
 
 
-
-
-# -----------------------------
-# Simulation + plotting
-# -----------------------------
+# Simulation and plotting
 def main():
     params = QuadParams()
+    
+    L = params.L
+    k_tau = params.k_tau
+    k = params.k
     A, B = params.linear_matrices()
     K = params.lqr_gain()
 
@@ -111,6 +102,7 @@ def main():
     t_span = (0.0, 70.0)
     t_eval = np.linspace(t_span[0], t_span[1], 3501)
 
+    # Build linear closed-loop system
     f_cl = make_closed_loop_rhs(A, B, K)
 
     sol = solve_ivp(
@@ -125,125 +117,85 @@ def main():
     t = sol.t
     x = sol.y
 
-    px   = x[0, :]
-    py   = x[1, :]
-    pz   = x[2, :]
-    vx   = x[3, :]
-    vy   = x[4, :]
-    vz   = x[5, :]
-    phi  = x[6, :]
+    px = x[0, :]
+    py = x[1, :]
+    pz = x[2, :]
+    vx = x[3, :]
+    vy = x[4, :]
+    vz = x[5, :]
+    phi = x[6, :]
     theta = x[7, :]
-    psi  = x[8, :]
-    p    = x[9, :]
-    q    = x[10, :]
-    r    = x[11, :]
+    psi = x[8, :]
+    p = x[9, :]
+    q = x[10, :]
+    r = x[11, :]
 
-    # -----------------------------
-    # Build derived quantities (needed for plots)
-    # -----------------------------
-    speed_xy  = np.sqrt(vx**2 + vy**2)
-    radius_xy = np.sqrt(px**2 + py**2)
 
-        # -----------------------------
-    # Inputs u(t) from logged history
-    # -----------------------------
-    t_input   = np.array([item[0] for item in f_cl.input_history])
+    # Extract input history
+    t_input = np.array([item[0] for item in f_cl.input_history])
     u_history = np.array([item[1] for item in f_cl.input_history])
 
-    F         = u_history[:, 0]
-    tau_phi   = u_history[:, 1]
+    T_total = u_history[:, 0]
+    tau_phi = u_history[:, 1]
     tau_theta = u_history[:, 2]
-    tau_psi   = u_history[:, 3]
+    tau_psi = u_history[:, 3]
     
-    F_phys = params.m * params.g + F   # interpret F as ΔF around hover
+    F_phys = params.m * params.g + T_total   # interpret F around hover
 
+    M = np.array([
+        [1.0,   1.0,   1.0,   1.0],
+        [0.0,  -L,     0.0,  +L  ],
+        [-L,    0.0,  +L,     0.0],
+        [k_tau, -k_tau, k_tau, -k_tau]
+    ])
 
+    U = np.vstack((F_phys, tau_phi, tau_theta, tau_psi))
+    T_motors = np.linalg.solve(M, U) 
      
-
-    # -----------------------------
-    # Motor thrusts T1..T4 (best-effort mixer inversion)
-    # If params.L and params.k_tau exist, invert standard "plus" mixer.
-    # Otherwise fall back to equal split (still gives a meaningful load plot).
-    # -----------------------------
-    try:
-        L = params.L
-        k_tau = params.k_tau
-
-        M = np.array([
-            [1.0,  1.0,  1.0,  1.0],
-            [0.0, -L,   0.0, +L  ],
-            [-L,  0.0, +L,   0.0],
-            [k_tau, -k_tau, k_tau, -k_tau]
-        ])
-
-        U = np.vstack((F_phys, tau_phi, tau_theta, tau_psi))  # (4, N)
-        T_motors = np.linalg.solve(M, U)                 # (4, N)
-    except Exception:
-        T_motors = np.vstack((F_phys/4, F_phys/4, F_phys/4, F_phys/4))
 
     T1, T2, T3, T4 = T_motors[0, :], T_motors[1, :], T_motors[2, :], T_motors[3, :]
     
-        # -----------------------------
-    # NEW: Rotor-based power + energy (includes baseline hover power)
-    # Using actuator-disk / momentum theory proxy:
-    #   P_i ≈ T_i^(3/2) / sqrt(2 ρ A)
-    # Electrical power: P_elec = P_mech / η
-    # -----------------------------
+    # Power and Energy Calculations
     rho = 1.225  # kg/m^3
-    R_rotor = getattr(params, "rotor_radius", 0.0635)  # m 
-    A_rotor = np.pi * R_rotor**2
-    eta = getattr(params, "eta", 0.7)  # overall efficiency (motor+ESC+prop)
+    R_rotor = getattr(params, "rotor_radius", 0.0635)   # radius
+    A_rotor = np.pi * R_rotor**2                        # area
+    eta = getattr(params, "eta", 0.7)                   # overall efficiency
 
     def thrust_to_power(T):
-        T = np.maximum(T, 0.0)  # avoid negative thrust -> NaNs
+        T = np.maximum(T, 0.0)    # avoid negative thrust
         return (T**1.5) / np.sqrt(2.0 * rho * A_rotor)
     
-    
-    
+
+    # Mechanical power for each rotor
     P_mech1 = thrust_to_power(T1)
     P_mech2 = thrust_to_power(T2)
     P_mech3 = thrust_to_power(T3)
     P_mech4 = thrust_to_power(T4)
     P_mech = P_mech1 + P_mech2 + P_mech3 + P_mech4
+    
+    # Electrical power using mechanical and efficiency factor
     P_elec = P_mech / eta
-
+    energy_used = np.mean(P_elec)*120/3600   # Battery power used in Watt-hours
+    print(f'Battery energy used: {energy_used:.2f} Wh')
+    
+    # Cumulative energy
     E_cumulative = np.cumsum(P_elec[:-1] * np.diff(t_input))
     E_cumulative = np.insert(E_cumulative, 0, 0.0)
-    E_total = np.trapezoid(P_elec, t_input)
-    print(E_total)
     
-    k = params.k
-    k_tau = params.k_tau
+    
+    # Angular velocity
     omega1 = np.sqrt(T1/k)
     omega2 = np.sqrt(T2/k)
     omega3 = np.sqrt(T3/k)
     omega4 = np.sqrt(T4/k)
-    print('omega1: ', omega1[10])
     
+    # Convert to RPM
     rpm1 = omega1*60/(2*np.pi)
     rpm2 = omega2*60/(2*np.pi)
     rpm3 = omega3*60/(2*np.pi)
     rpm4 = omega4*60/(2*np.pi)
-    
-    torque_motor1 = P_mech1/omega1
-    torque_motor2 = P_mech2/omega2
-    torque_motor3 = P_mech3/omega3
-    torque_motor4 = P_mech4/omega4
-    print('motor torque: ', torque_motor1[10])
-    
-    current1 = torque_motor1/k_tau
-    current2 = torque_motor2/k_tau
-    current3 = torque_motor3/k_tau
-    current4 = torque_motor4/k_tau
-    current_total = current1 + current2 + current3 + current4
-    print(current_total[10])
-    
-    battery_consumption = np.trapezoid(current_total, t_input) # [Ah]
-    print(battery_consumption)
 
-    # -----------------------------
-    # FIGURE 1: 3D trajectory (own figure)
-    # -----------------------------
+    # Plotting 3D position
     fig1 = plt.figure(figsize=(8, 6))
     ax = fig1.add_subplot(111, projection='3d')
     ax.plot(px, py, pz, linewidth=2, label='Trajectory')
@@ -254,9 +206,8 @@ def main():
     ax.grid(True)
     ax.legend()
 
-    # -----------------------------
-    # FIGURE 2: 12 DOFs grouped (2x2) in one figure
-    # -----------------------------
+
+    # Plotting drone state over time
     fig2, axs = plt.subplots(2, 2, figsize=(14, 9), sharex=True)
     axs = axs.ravel()
 
@@ -291,7 +242,7 @@ def main():
     axs[2].grid(True)
     axs[2].legend()
 
-    # Body rates
+    # Angular rates
     axs[3].plot(t, np.rad2deg(p), linewidth=2, label='p (roll rate)')
     axs[3].plot(t, np.rad2deg(q), linewidth=2, label='q (pitch rate)')
     axs[3].plot(t, np.rad2deg(r), linewidth=2, label='r (yaw rate)')
@@ -307,10 +258,12 @@ def main():
     fig2.tight_layout()
     fig2.subplots_adjust(top=0.92)
 
+
+    # Plotting control inputs, RPMs, and energy
     fig3, axs3 = plt.subplots(2, 2, figsize=(14, 9))
     axs3 = axs3.ravel()
 
-    # (1) Inputs: thrust + torques (twin y-axis)
+    # Control inputs
     ax_u = axs3[0]
     ax_u.plot(t_input, F_phys, linewidth=2, label='F (thrust)')  # F_plot = T_total (hover) OR F_phys (circle)
     ax_u.set_xlabel('Time [s]', fontsize=14)
@@ -318,20 +271,17 @@ def main():
     ax_u.set_title('Inputs u(t)', fontsize=16)
     ax_u.set_ylim(-0.5, 6)
     ax_u.grid(True)
-
     ax_u2 = ax_u.twinx()
     ax_u2.plot(t_input, tau_phi,   linewidth=2, linestyle='--', label='τφ')
     ax_u2.plot(t_input, tau_theta, linewidth=2, linestyle='--', label='τθ')
     ax_u2.plot(t_input, tau_psi,   linewidth=2, linestyle='--', label='τψ')
     ax_u2.set_ylim(-0.1, 0.1)
     ax_u2.set_ylabel('Torque [N·m]', fontsize=14)
-
-    # Combined legend
     lines1, labels1 = ax_u.get_legend_handles_labels()
     lines2, labels2 = ax_u2.get_legend_handles_labels()
     ax_u2.legend(lines1 + lines2, labels1 + labels2, loc='best')
 
-    # (2) RPM
+    # RPM
     axs3[1].plot(t_input, rpm1, linewidth=2, label='rpm1')
     axs3[1].plot(t_input, rpm2, linewidth=2, label='rpm2')
     axs3[1].plot(t_input, rpm3, linewidth=2, label='rpm3')
@@ -339,11 +289,10 @@ def main():
     axs3[1].set_xlabel('Time [s]', fontsize=14)
     axs3[1].set_ylabel('Revolutions per Minute', fontsize=14)
     axs3[1].set_title('Motor RPMs', fontsize=16)
-    #axs3[1].set_ylim(-0.1, 1.5)
     axs3[1].grid(True)
     axs3[1].legend()
 
-    # (3) Power
+    # Power
     axs3[2].plot(t_input, P_elec, linewidth=2)
     axs3[2].set_xlabel('Time [s]', fontsize=14)
     axs3[2].set_ylabel('Power [W]', fontsize=14)
@@ -351,7 +300,7 @@ def main():
     axs3[2].set_ylim(-5, 50)
     axs3[2].grid(True)
 
-    # (4) Energy
+    # Cumulative electrical energy
     axs3[3].plot(t_input, E_cumulative, linewidth=2)
     axs3[3].set_xlabel('Time [s]', fontsize=14)
     axs3[3].set_ylabel('Energy [J]', fontsize=14)
@@ -364,8 +313,6 @@ def main():
     fig3.subplots_adjust(top=0.92)
 
     plt.show()
-
-
 
 
 if __name__ == "__main__":
